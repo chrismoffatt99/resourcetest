@@ -1,0 +1,389 @@
+﻿{
+    "$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "sqlServerAdminLogin": {
+            "type": "string"
+        },
+        "sqlServerAdminPassword": {
+            "type": "securestring"
+        },
+        "sqlServerHostname": {
+            "type": "string"
+        },
+        "sqlServerProductionApiLogin": {
+            "type": "string",
+            "defaultValue": "EdFiOdsProductionApi"
+        },
+        "sqlServerProductionApiPassword": {
+            "type": "securestring"
+        },
+        "sqlServerSandboxApiLogin": {
+            "type": "string",
+            "defaultValue": "EdFiOdsSandboxApi"
+        },
+        "sqlServerSandboxApiPassword": {
+            "type": "securestring"
+        },
+        "version": {
+            "type": "string"
+        },
+        "edition": {
+            "type": "string",
+            "allowedValues": [ "test", "release" ],
+            "defaultValue": "release"
+        },
+        "appInsightsLocation": {
+            "type": "string",
+            "allowedValues": [ "East US", "South Central US" ],
+            "defaultValue": "South Central US"
+        }
+    },
+    "variables": {
+        "odsAssetsBaseUrl": "[concat('https://odsassets.blob.core.windows.net/public/', parameters('edition'), '/', parameters('version'), '/')]",
+        "sqlMaxSizeBytes_Standard": "268435456000",
+        "sqlMaxSizeBytes_Premium": "536870912000",
+        "sqlServerSettings": {
+            "hostname": "[parameters('sqlServerHostname')]",
+            "administratorLogin": "[parameters('sqlServerAdminLogin')]",
+            "administratorLoginPassword": "[parameters('sqlServerAdminPassword')]"
+        },
+        "productionWebsiteSettings": {
+            "hostingPlanName": "Ed-Fi-Production-Websites",
+            "pricingTier": "S1",
+            "apiWebsiteName": "[concat('EdFiOdsApiWebSite-Production-', uniqueString(resourceGroup().id))]",
+            "sqlLogin": "[parameters('sqlServerProductionApiLogin')]",
+            "sqlPassword": "[parameters('sqlServerProductionApiPassword')]"
+        },
+        "sandboxWebsiteSettings": {
+            "hostingPlanName": "Ed-Fi-Sandbox-Websites",
+            "pricingTier": "S1",
+            "apiWebsiteName": "[concat('EdFiOdsApiWebSite-Sandbox-', uniqueString(resourceGroup().id))]",
+            "swaggerWebsiteName": "[concat('EdFiOdsSwaggerWebSite-Sandbox-', uniqueString(resourceGroup().id))]",
+            "sqlLogin": "[parameters('sqlServerSandboxApiLogin')]",
+            "sqlPassword": "[parameters('sqlServerSandboxApiPassword')]"
+        },
+        "odsApiAssetsUrl": "[concat(variables('odsAssetsBaseurl'), 'EdFi.Ods.WebApi.zip')]",
+        "swaggerAssetsUrl": "[concat(variables('odsAssetsBaseurl'), 'EdFi.Ods.SwaggerUI.zip')]",
+        "odsstorageName": "[concat('odsstorage', uniqueString(resourceGroup().id))]"
+
+    },
+    "resources": [
+        {
+            "apiVersion": "2015-08-01",
+            "name": "[variables('productionWebsiteSettings').hostingPlanName]",
+            "type": "Microsoft.Web/serverfarms",
+            "location": "[resourceGroup().location]",
+            "tags": {
+                "displayName": "Production Web Hosting Plan"
+            },
+            "sku": {
+                "name": "[variables('productionWebsiteSettings').pricingTier]",
+                "capacity": 1
+            },
+            "properties": {
+                "name": "[variables('productionWebsiteSettings').hostingPlanName]"
+            }
+        },
+        {
+            "apiVersion": "2015-08-01",
+            "name": "[variables('productionWebsiteSettings').apiWebsiteName]",
+            "type": "Microsoft.Web/sites",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[concat('Microsoft.Web/serverFarms/', variables('productionWebsiteSettings').hostingPlanName)]"
+            ],
+            "tags": {
+                "[concat('hidden-related:', resourceId('Microsoft.Web/serverfarms/', variables('productionWebsiteSettings').hostingPlanName))]": "empty",
+                "displayName": "Production API Website",
+                "Cloud-Ods-Role": "Api",
+                "Cloud-Ods-Environment": "Production"
+            },
+            "properties": {
+                "name": "[variables('productionWebsiteSettings').apiWebsiteName]",
+                "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('productionWebsiteSettings').hostingPlanName)]",
+                "siteConfig": {
+                    "AlwaysOn": true
+                }
+            },
+            "resources": [
+                {
+                    "apiVersion": "2015-08-01",
+                    "type": "config",
+                    "name": "connectionstrings",
+                    "dependsOn": [
+                        "[concat('Microsoft.Web/sites/', variables('productionWebsiteSettings').apiWebsiteName)]",
+                        "[concat('Microsoft.Web/sites/', variables('productionWebsiteSettings').apiWebsiteName, '/extensions/MSDeploy')]"
+                    ],
+                    "properties": {
+                        "EdFi_Ods": {
+                            "value": "[concat('Data Source=tcp:', variables('sqlServerSettings').hostname, ';Initial Catalog=EdFi_Ods_Production;User Id=\"', variables('productionWebsiteSettings').sqlLogin,'\";Password=\"', variables('productionWebsiteSettings').sqlPassword, '\";')]",
+                            "type": "SQLServer"
+                        },
+                        "EdFi_Admin": {
+                            "value": "[concat('Data Source=tcp:', variables('sqlServerSettings').hostname, ';Initial Catalog=EdFi_Admin;User Id=\"', variables('productionWebsiteSettings').sqlLogin,'\";Password=\"', variables('productionWebsiteSettings').sqlPassword, '\";')]",
+                            "type": "SQLServer"
+                        },
+                        "EdFi_Security": {
+                            "value": "[concat('Data Source=tcp:', variables('sqlServerSettings').hostname, ';Initial Catalog=EdFi_Security;User Id=\"', variables('productionWebsiteSettings').sqlLogin,'\";Password=\"', variables('productionWebsiteSettings').sqlPassword, '\";')]",
+                            "type": "SQLServer"
+                        },
+                        "EdFi_Master": {
+                            "value": "[concat('Data Source=tcp:', variables('sqlServerSettings').hostname, ';Initial Catalog=master;User Id=\"', variables('productionWebsiteSettings').sqlLogin,'\";Password=\"', variables('productionWebsiteSettings').sqlPassword, '\";')]",
+                            "type": "SQLServer"
+                        }
+                    }
+                },
+                {
+                    "apiVersion": "2015-08-01",
+                    "type": "config",
+                    "name": "appsettings",
+                    "dependsOn": [
+                        "[concat('Microsoft.Web/sites/', variables('productionWebsiteSettings').apiWebsiteName)]",
+                        "[concat('Microsoft.Web/sites/', variables('productionWebsiteSettings').apiWebsiteName, '/extensions/MSDeploy')]",
+                        "[concat('AppInsights-', variables('productionWebsiteSettings').apiWebsiteName)]"
+                    ],
+                    "properties": {
+                        "owin:appStartup": "AzureCloudOds",
+                        "PreserveLoginUrl": "true",
+                        "DescriptorNamespacePrefix": "http://www.ed-fi.org",
+                        "BearerTokenTimeoutInMinutes": "15",
+                        "ApplicationInsightsInstrumentationKey": "[reference(resourceId('Microsoft.Insights/components', concat('AppInsights-', variables('productionWebsiteSettings').apiWebsiteName)), '2014-04-01').InstrumentationKey]"
+                    }
+                },
+                {
+                    "apiVersion": "2015-08-01",
+                    "dependsOn": [
+                        "[concat('Microsoft.Web/sites/', variables('productionWebsiteSettings').apiWebsiteName)]"
+                    ],
+                    "location": "[resourceGroup().location]",
+                    "name": "MSDeploy",
+                    "properties": {
+                        "connectionString": "",
+                        "dbType": "None",
+                        "packageUri": "[variables('odsApiAssetsUrl')]",
+                        "setParameters": {
+                            "IIS Web Application Name": "[variables('productionWebsiteSettings').apiWebsiteName]"
+                        }
+                    },
+                    "tags": {
+                        "displayName": "deployment"
+                    },
+                    "type": "extensions"
+                }
+            ]
+        },
+        {
+            "apiVersion": "2015-08-01",
+            "name": "[variables('sandboxWebsiteSettings').hostingPlanName]",
+            "type": "Microsoft.Web/serverfarms",
+            "location": "[resourceGroup().location]",
+            "tags": {
+                "displayName": "Sandbox Web Hosting Plan"
+            },
+            "sku": {
+                "name": "[variables('sandboxWebsiteSettings').pricingTier]",
+                "capacity": 1
+            },
+            "properties": {
+                "name": "[variables('sandboxWebsiteSettings').hostingPlanName]"
+            },
+            "dependsOn": [
+                "[concat('Microsoft.Web/serverFarms/', variables('productionWebsiteSettings').hostingPlanName)]"
+            ]
+        },
+        {
+            "apiVersion": "2015-08-01",
+            "name": "[variables('sandboxWebsiteSettings').apiWebsiteName]",
+            "type": "Microsoft.Web/sites",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[concat('Microsoft.Web/serverFarms/', variables('sandboxWebsiteSettings').hostingPlanName)]"
+            ],
+            "tags": {
+                "[concat('hidden-related:', resourceId('Microsoft.Web/serverfarms/', variables('sandboxWebsiteSettings').hostingPlanName))]": "empty",
+                "displayName": "Sandbox API Website",
+                "Cloud-Ods-Role": "Api",
+                "Cloud-Ods-Environment": "Sandbox"
+            },
+            "properties": {
+                "name": "[variables('sandboxWebsiteSettings').apiWebsiteName]",
+                "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('sandboxWebsiteSettings').hostingPlanName)]",
+                "siteConfig": {
+                    "AlwaysOn": true
+                }
+            },
+            "resources": [
+                {
+                    "apiVersion": "2015-08-01",
+                    "type": "config",
+                    "name": "connectionstrings",
+                    "dependsOn": [
+                        "[concat('Microsoft.Web/sites/', variables('sandboxWebsiteSettings').apiWebsiteName)]",
+                        "[concat('Microsoft.Web/sites/', variables('sandboxWebsiteSettings').apiWebsiteName, '/extensions/MSDeploy')]"
+                    ],
+                    "properties": {
+                        "EdFi_Ods": {
+                            "value": "[concat('Data Source=tcp:', variables('sqlServerSettings').hostname, ';Initial Catalog=EdFi_Ods_Sandbox;User Id=\"', variables('sandboxWebsiteSettings').sqlLogin,'\";Password=\"', variables('sandboxWebsiteSettings').sqlPassword, '\";')]",
+                            "type": "SQLServer"
+                        },
+                        "EdFi_Admin": {
+                            "value": "[concat('Data Source=tcp:', variables('sqlServerSettings').hostname, ';Initial Catalog=EdFi_Admin;User Id=\"', variables('sandboxWebsiteSettings').sqlLogin,'\";Password=\"', variables('sandboxWebsiteSettings').sqlPassword, '\";')]",
+                            "type": "SQLServer"
+                        },
+                        "EdFi_Security": {
+                            "value": "[concat('Data Source=tcp:', variables('sqlServerSettings').hostname, ';Initial Catalog=EdFi_Security;User Id=\"', variables('sandboxWebsiteSettings').sqlLogin,'\";Password=\"', variables('sandboxWebsiteSettings').sqlPassword, '\";')]",
+                            "type": "SQLServer"
+                        },
+                        "EdFi_Master": {
+                            "value": "[concat('Data Source=tcp:', variables('sqlServerSettings').hostname, ';Initial Catalog=master;User Id=\"', variables('sandboxWebsiteSettings').sqlLogin,'\";Password=\"', variables('sandboxWebsiteSettings').sqlPassword, '\";')]",
+                            "type": "SQLServer"
+                        }
+                    }
+                },
+                {
+                    "apiVersion": "2015-08-01",
+                    "type": "config",
+                    "name": "appsettings",
+                    "dependsOn": [
+                        "[concat('Microsoft.Web/sites/', variables('sandboxWebsiteSettings').apiWebsiteName)]",
+                        "[concat('Microsoft.Web/sites/', variables('sandboxWebsiteSettings').apiWebsiteName, '/extensions/MSDeploy')]"
+                    ],
+                    "properties": {
+                        "owin:appStartup": "AzureCloudOds",
+                        "PreserveLoginUrl": "true",
+                        "DescriptorNamespacePrefix": "http://www.ed-fi.org",
+                        "BearerTokenTimeoutInMinutes": "15"
+                    }
+                },
+                {
+                    "apiVersion": "2015-08-01",
+                    "dependsOn": [
+                        "[concat('Microsoft.Web/sites/', variables('sandboxWebsiteSettings').apiWebsiteName)]"
+                    ],
+                    "location": "[resourceGroup().location]",
+                    "name": "MSDeploy",
+                    "properties": {
+                        "connectionString": "",
+                        "dbType": "None",
+                        "packageUri": "[variables('odsApiAssetsUrl')]",
+                        "setParameters": {
+                            "IIS Web Application Name": "[variables('sandboxWebsiteSettings').apiWebsiteName]"
+                        }
+                    },
+                    "tags": {
+                        "displayName": "deployment"
+                    },
+                    "type": "extensions"
+                }
+            ]
+        },
+        {
+            "apiVersion": "2015-08-01",
+            "name": "[variables('sandboxWebsiteSettings').swaggerWebsiteName]",
+            "type": "Microsoft.Web/sites",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[concat('Microsoft.Web/serverFarms/', variables('sandboxWebsiteSettings').hostingPlanName)]"
+            ],
+            "tags": {
+                "[concat('hidden-related:', resourceId('Microsoft.Web/serverfarms/', variables('sandboxWebsiteSettings').hostingPlanName))]": "empty",
+                "displayName": "Sandbox Swagger Website",
+                "Cloud-Ods-Role": "Swagger",
+                "Cloud-Ods-Environment": "Sandbox"
+            },
+            "properties": {
+                "name": "[variables('sandboxWebsiteSettings').swaggerWebsiteName]",
+                "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('sandboxWebsiteSettings').hostingPlanName)]"
+            },
+            "resources": [
+                {
+                    "apiVersion": "2015-08-01",
+                    "type": "config",
+                    "name": "appsettings",
+                    "dependsOn": [
+                        "[concat('Microsoft.Web/sites/', variables('sandboxWebsiteSettings').swaggerWebsiteName)]",
+                        "[concat('Microsoft.Web/sites/', variables('sandboxWebsiteSettings').apiWebsiteName)]",
+                        "[concat('Microsoft.Web/sites/', variables('sandboxWebsiteSettings').swaggerWebsiteName, '/extensions/MSDeploy')]"
+                    ],
+                    "properties": {
+                        "swagger.webApi": "[concat('https://', reference(resourceId('Microsoft.Web/sites', variables('sandboxWebsiteSettings').apiWebsiteName)).hostNames[0], '/api/v2.0')]",
+                        "swagger.webApiMetadataUrl": "[concat('https://', reference(resourceId('Microsoft.Web/sites', variables('sandboxWebsiteSettings').apiWebsiteName)).hostNames[0], '/metadata/{section}/api-docs')]",
+                        "swagger.adminUrl": "[concat('https://', reference(resourceId('Microsoft.Web/sites', variables('sandboxWebsiteSettings').apiWebsiteName)).hostNames[0], '/oauth/')]"
+                    }
+                },
+                {
+                    "apiVersion": "2015-08-01",
+                    "dependsOn": [
+                        "[concat('Microsoft.Web/sites/', variables('sandboxWebsiteSettings').swaggerWebsiteName)]"
+                    ],
+                    "location": "[resourceGroup().location]",
+                    "name": "MSDeploy",
+                    "properties": {
+                        "connectionString": "",
+                        "dbType": "None",
+                        "packageUri": "[variables('swaggerAssetsUrl')]",
+                        "setParameters": {
+                            "IIS Web Application Name": "[variables('sandboxWebsiteSettings').swaggerWebsiteName]"
+                        }
+                    },
+                    "tags": {
+                        "displayName": "deployment"
+                    },
+                    "type": "extensions"
+                }
+            ]
+        },
+        {
+            "name": "[variables('odsstorageName')]",
+            "type": "Microsoft.Storage/storageAccounts",
+            "location": "[resourceGroup().location]",
+            "apiVersion": "2015-06-15",
+            "dependsOn": [ ],
+            "tags": {
+                "displayName": "EdFi ODS Storage Account"
+            },
+            "properties": {
+                "accountType": "Standard_LRS"
+            }
+        },
+        {
+            "name": "[concat('AppInsights-', variables('productionWebsiteSettings').apiWebsiteName)]",
+            "type": "Microsoft.Insights/components",
+            "location": "[parameters('appInsightsLocation')]",
+            "apiVersion": "2014-04-01",
+            "dependsOn": [
+                "[concat('Microsoft.Web/sites/', variables('productionWebsiteSettings').apiWebsiteName)]"
+            ],
+            "tags": {
+				"[concat('hidden-link:', resourceId('Microsoft.Web/sites', variables('productionWebsiteSettings').apiWebsiteName))]": "Resource",
+                "displayName": "Production Api AppInsights"
+            },
+            "properties": {
+                "applicationId": "[variables('productionWebsiteSettings').apiWebsiteName]"
+            }
+        }
+    ],
+    "outputs": {
+        "swaggerUrl": {
+            "type": "string",
+            "value": "[concat('https://', reference(resourceId('Microsoft.Web/sites', variables('sandboxWebsiteSettings').swaggerWebsiteName)).hostNames[0])]"
+        },
+        "productionApiUrl": {
+            "type": "string",
+            "value": "[concat('https://', reference(resourceId('Microsoft.Web/sites', variables('productionWebsiteSettings').apiWebsiteName)).hostNames[0])]"
+        },
+        "sandboxApiUrl": {
+            "type": "string",
+            "value": "[concat('https://', reference(resourceId('Microsoft.Web/sites', variables('sandboxWebsiteSettings').apiWebsiteName)).hostNames[0])]"
+        },
+        "resourceGroupUniqueString": {
+            "type": "string",
+            "value": "[uniqueString(resourceGroup().id)]"
+        },
+        "sqlServerHostname": {
+            "type": "string",
+            "value": "[parameters('sqlServerHostname')]"
+        }
+    }
+}
